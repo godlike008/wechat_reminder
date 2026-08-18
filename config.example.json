@@ -1,6 +1,17 @@
 {
-  "friend": "我宝",
-  "message": "记得吃药啦 💊",
-  "schedule_time": "10:00",
-  "wechat_app_name": "WeChat"
+  "wechat_app_name": "WeChat",
+  "reminders": [
+    {
+      "friend": "我宝",
+      "message": "记得吃药啦 💊",
+      "days": "daily",
+      "times": ["08:00", "14:00", "20:00"]
+    },
+    {
+      "friend": "妈妈",
+      "message": "该量血压了 🩺",
+      "days": ["1", "3", "5"],
+      "times": ["09:00"]
+    }
+  ]
 }

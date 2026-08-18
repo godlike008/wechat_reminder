@@ -1,39 +1,35 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""跨平台微信定时提醒——注册/卸载定时任务
-macOS:   launchd (LaunchAgents plist)
-Windows: 任务计划程序 (schtasks)
+"""跨平台微信定时提醒——注册/卸载定时任务 v2
+调度策略: 每分钟触发一次 send_reminder.py --scheduled，
+脚本自身判断"当前时刻是否匹配各好友的时段"并防重复，
+因此改 config.json 无需重装定时任务。
+
+macOS:   launchd (StartInterval=60)
+Windows: 任务计划程序 (schtasks /SC MINUTE /MO 1)
 
 用法:
-    python install_schedule.py            # 注册（读取 config.json 的时间）
+    python install_schedule.py            # 注册
     python install_schedule.py --uninstall
 """
 import argparse
-import json
 import os
 import platform
 import subprocess
 import sys
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 SCRIPT_PATH = os.path.join(BASE_DIR, "send_reminder.py")
 LABEL = "com.wechat.reminder"
 WIN_TASK_NAME = "WeChatMedicineReminder"
 
 
-def load_config():
-    with open(CONFIG_PATH, encoding="utf-8") as f:
-        return json.load(f)
-
-
 # ---------------- macOS: launchd ----------------
 
-def install_macos(schedule_time):
-    hour, minute = schedule_time.split(":")
+def install_macos():
     plist_path = os.path.expanduser("~/Library/LaunchAgents/%s.plist" % LABEL)
-
     python_bin = sys.executable or "/usr/bin/python3"
+
     plist = """<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -44,31 +40,26 @@ def install_macos(schedule_time):
     <array>
         <string>%s</string>
         <string>%s</string>
+        <string>--scheduled</string>
     </array>
-    <key>StartCalendarInterval</key>
-    <dict>
-        <key>Hour</key>
-        <integer>%d</integer>
-        <key>Minute</key>
-        <integer>%d</integer>
-    </dict>
+    <key>StartInterval</key>
+    <integer>60</integer>
     <key>RunAtLoad</key>
-    <false/>
+    <true/>
     <key>StandardOutPath</key>
     <string>%s/stdout.log</string>
     <key>StandardErrorPath</key>
     <string>%s/stderr.log</string>
 </dict>
 </plist>
-""" % (LABEL, python_bin, SCRIPT_PATH, int(hour), int(minute), BASE_DIR, BASE_DIR)
+""" % (LABEL, python_bin, SCRIPT_PATH, BASE_DIR, BASE_DIR)
 
     with open(plist_path, "w", encoding="utf-8") as f:
         f.write(plist)
 
-    subprocess.run(["launchctl", "unload", plist_path],
-                   capture_output=True)
+    subprocess.run(["launchctl", "unload", plist_path], capture_output=True)
     subprocess.run(["launchctl", "load", plist_path], check=True)
-    print("macOS: 定时任务已注册 -> 每天 %s" % schedule_time)
+    print("macOS: 定时任务已注册(每分钟检查一次)")
     print("       plist: %s" % plist_path)
     return True
 
@@ -84,15 +75,15 @@ def uninstall_macos():
 
 # ---------------- Windows: schtasks ----------------
 
-def install_windows(schedule_time):
+def install_windows():
     cmd = [
         "schtasks", "/Create", "/TN", WIN_TASK_NAME,
-        "/SC", "DAILY", "/ST", schedule_time,
-        "/TR", '"%s" "%s"' % (sys.executable, SCRIPT_PATH),
+        "/SC", "MINUTE", "/MO", "1",
+        "/TR", '"%s" "%s" --scheduled' % (sys.executable, SCRIPT_PATH),
         "/F",
     ]
     subprocess.run(cmd, check=True)
-    print("Windows: 定时任务已注册 -> 每天 %s" % schedule_time)
+    print("Windows: 定时任务已注册(每分钟检查一次)")
     print("       任务名: %s (可在 任务计划程序 中查看)" % WIN_TASK_NAME)
     return True
 
@@ -105,13 +96,11 @@ def uninstall_windows():
 
 
 def main():
-    parser = argparse.ArgumentParser(description="微信定时提醒 任务注册器")
+    parser = argparse.ArgumentParser(description="微信定时提醒 任务注册器 v2")
     parser.add_argument("--uninstall", action="store_true", help="卸载定时任务")
     args = parser.parse_args()
 
     system = platform.system()
-    cfg = load_config()
-    schedule_time = cfg.get("schedule_time", "10:00")
 
     if args.uninstall:
         if system == "Darwin":
@@ -123,9 +112,9 @@ def main():
             sys.exit(1)
     else:
         if system == "Darwin":
-            install_macos(schedule_time)
+            install_macos()
         elif system == "Windows":
-            install_windows(schedule_time)
+            install_windows()
         else:
             print("不支持的系统: %s" % system)
             sys.exit(1)

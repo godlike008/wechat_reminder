@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""跨平台微信定时提醒——发送核心（可靠性增强版）
+"""跨平台微信定时提醒——发送核心 v2
 macOS: AppleScript + System Events (UI 自动化)
 Windows: uiautomation (UI 自动化)
 
-可靠性增强:
-  1. 发送前自检: 微信未运行则自动启动
-  2. 失败重试: 自动重试多次
-  3. 结果验证: 发送后读取 UI 树确认消息真实发出
-  4. 锁屏处理: 检测到锁屏则等待解锁后发送
-  5. 恢复剪贴板: 结束后还原用户原有剪贴板内容
+功能:
+  - 多好友批量: config.json 中 reminders 数组
+  - 每天多次: 每个 reminder 的 times 数组
+  - 按星期调度: days 支持 daily/weekdays/weekends/数组
+  - 可靠性: 自检、自动启动微信、重试、UI验证、锁屏处理
+  - 防重复: 状态文件记录已发送, 防止定时任务重复触发
 
 用法:
-    python send_reminder.py              # 读取 config.json 发送
-    python send_reminder.py -n 我宝      # 覆盖好友备注名
-    python send_reminder.py -m "记得吃药" # 覆盖文案
+    python send_reminder.py --scheduled   # 定时模式(任务计划每分钟调用)
+    python send_reminder.py -n 我宝      # 手动发送给某好友(覆盖配置)
+    python send_reminder.py -m "记得吃药" # 手动覆盖文案
 """
 import argparse
 import json
@@ -25,10 +25,12 @@ import re
 import subprocess
 import sys
 import time
+from datetime import datetime
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 LOG_PATH = os.path.join(BASE_DIR, "reminder.log")
+STATE_PATH = os.path.join(BASE_DIR, "reminder_state.json")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -43,6 +45,7 @@ log = logging.getLogger("wechat_reminder")
 RETRY_TIMES = 3
 UNLOCK_TIMEOUT = 4 * 3600  # 锁屏最长等待 4 小时
 UNLOCK_POLL = 15           # 每 15 秒检查一次
+TIME_WINDOW_MIN = 5        # 定时触发的时间容差(分钟)
 
 
 def load_config():
@@ -52,6 +55,62 @@ def load_config():
 
 def is_os_macos():
     return platform.system() == "Darwin"
+
+
+def today_iso():
+    return datetime.now().strftime("%Y-%m-%d")
+
+
+def weekday_iso():
+    return datetime.now().isoweekday()  # 1=周一 ... 7=周日
+
+
+def load_state():
+    try:
+        with open(STATE_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def save_state(state):
+    with open(STATE_PATH, "w", encoding="utf-8") as f:
+        json.dump(state, f, ensure_ascii=False, indent=2)
+
+
+def mark_sent(key):
+    state = load_state()
+    state[key] = True
+    save_state(state)
+
+
+def is_sent(key):
+    return load_state().get(key, False)
+
+
+def day_matches(spec, wd):
+    """判断某 reminder 是否在今天触发。wd 为 1=周一...7=周日。"""
+    if spec is None or spec == "daily":
+        return True
+    if spec == "weekdays":
+        return 1 <= wd <= 5
+    if spec == "weekends":
+        return wd >= 6
+    if isinstance(spec, list):
+        return wd in spec
+    return True
+
+
+def now_in_window(target_hhmm, now_hhmm):
+    """判断当前时间是否落在目标时刻的容差窗口内(避免定时任务错点)。"""
+    try:
+        th, tm = int(target_hhmm[:2]), int(target_hhmm[3:5])
+        nh, nm = int(now_hhmm[:2]), int(now_hhmm[3:5])
+        target_min = th * 60 + tm
+        now_min = nh * 60 + nm
+        return 0 <= now_min - target_min < TIME_WINDOW_MIN
+    except Exception:
+        return False
 
 
 # ---------------- 剪贴板 ----------------
@@ -347,7 +406,7 @@ def wait_for_unlock():
     return True
 
 
-def send(friend, message):
+def send(friend, message, wait_unlock=True):
     # 1. 自检：微信是否运行
     if not wechat_running():
         log.info("微信未运行，尝试启动…")
@@ -356,7 +415,7 @@ def send(friend, message):
             return False
 
     # 4. 锁屏则等待解锁
-    if not wait_for_unlock():
+    if wait_unlock and not wait_for_unlock():
         return False
 
     # 5. 保存并接管剪贴板
@@ -385,17 +444,74 @@ def send(friend, message):
         # 5. 恢复剪贴板
         restore_clipboard(original_clipboard)
 
+def run_scheduled():
+    """定时模式：每分钟由任务计划调用，检查是否有到点的提醒并发送。
+    用状态文件防重复——同一天同一时段只发一次。"""
+    cfg = load_config()
+    reminders = cfg.get("reminders", [])
+    wd = weekday_iso()
+    today = today_iso()
+    now_hhmm = datetime.now().strftime("%H:%M")
+
+    matched = False
+    for r in reminders:
+        friend = r["friend"]
+        message = r.get("message", "记得吃药啦 💊")
+        times = r.get("times", ["10:00"])
+
+        if not day_matches(r.get("days", "daily"), wd):
+            log.debug("跳过 %s: 今天(周%d)不在调度内", friend, wd)
+            continue
+
+        for t in times:
+            if not now_in_window(t, now_hhmm):
+                continue
+            matched = True
+            key = "%s|%s|%s" % (friend, today, t)
+            if is_sent(key):
+                log.info("已发送过 %s 今天的 %s，跳过", friend, t)
+                continue
+            log.info("到点: %s @ %s -> %s", friend, t, message)
+            ok = send(friend, message, wait_unlock=False)
+            if ok:
+                mark_sent(key)
+                log.info("已完成 %s @ %s 并记录状态", friend, t)
+            else:
+                log.error("%s @ %s 发送失败，未记录状态(下一分钟会重试)", friend, t)
+
+    if not matched:
+        log.debug("当前 %s 无到点提醒", now_hhmm)
+
+
 def main():
-    parser = argparse.ArgumentParser(description="微信定时提醒发送器")
-    parser.add_argument("-n", "--name", help="好友备注名（覆盖 config.json）")
-    parser.add_argument("-m", "--message", help="提醒文案（覆盖 config.json）")
+    parser = argparse.ArgumentParser(description="微信定时提醒发送器 v2")
+    parser.add_argument("--scheduled", action="store_true",
+                        help="定时模式(由任务计划每分钟调用)")
+    parser.add_argument("-n", "--name", help="手动发送: 好友备注名")
+    parser.add_argument("-m", "--message", help="手动发送: 文案(默认读取配置)")
     args = parser.parse_args()
 
-    cfg = load_config()
-    friend = args.name or cfg["friend"]
-    message = args.message or cfg["message"]
+    if args.scheduled:
+        run_scheduled()
+        sys.exit(0)
 
-    ok = send(friend, message)
+    cfg = load_config()
+    reminders = cfg.get("reminders", [])
+    if args.name:
+        # 手动模式: 发送给指定好友
+        message = args.message
+        if message is None:
+            r = next((x for x in reminders if x["friend"] == args.name), None)
+            message = r["message"] if r else "记得吃药啦 💊"
+        ok = send(args.name, message)
+        sys.exit(0 if ok else 1)
+
+    # 无参数: 手动发送配置中第一个 reminder
+    if not reminders:
+        log.error("config.json 中没有 reminders 配置")
+        sys.exit(1)
+    r = reminders[0]
+    ok = send(r["friend"], r.get("message", "记得吃药啦 💊"))
     sys.exit(0 if ok else 1)
 
 

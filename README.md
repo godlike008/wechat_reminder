@@ -1,37 +1,65 @@
 # 微信定时提醒（跨平台）
 
-每天定时自动发微信消息提醒好友吃药。**无需网页协议，无封号风险**，走系统 UI 自动化操控微信桌面版。
+自动发微信消息提醒好友（吃药/复诊/任何事）。**无需网页协议，无封号风险**，走系统 UI 自动化操控微信桌面版。
+
+## 特性 v2
+
+- **多好友批量**：一次配置多个人，各自独立文案
+- **每天多次**：每人可设多个时段（如早 8 / 午 14 / 晚 20）
+- **按星期调度**：`daily` / `weekdays` / `weekends` / 指定星期数组
+- **防重复**：状态文件保证同一天同一时段只发一次
+- **可靠性**：自检、自动启动微信、失败重试、UI 验证、锁屏处理
 
 ## 目录
 
 ```
 wechat_reminder/
-├── config.json            # 参数配置：好友备注名 / 文案 / 时间
+├── config.json            # 参数配置（含隐私，不入库）
+├── config.example.json    # 配置示例（可克隆）
 ├── send_reminder.py       # 发送核心（macOS + Windows 通用）
 ├── install_schedule.py    # 注册/卸载定时任务
-└── reminder.log           # 发送日志（自动生成）
+├── reminder.log           # 发送日志（自动生成）
+└── reminder_state.json    # 发送状态（自动生成，防重复）
 ```
 
 ## 快速开始（两台平台都只需 3 步）
 
 ### 1. 配置参数
 
-编辑 `config.json`：
+复制示例并编辑 `config.json`：
+
+```bash
+cp config.example.json config.json
+```
 
 ```json
 {
-  "friend": "我宝",
-  "message": "记得吃药啦 💊",
-  "schedule_time": "10:00",
-  "wechat_app_name": "WeChat"
+  "wechat_app_name": "WeChat",
+  "reminders": [
+    {
+      "friend": "我宝",
+      "message": "记得吃药啦 💊",
+      "days": "daily",
+      "times": ["08:00", "14:00", "20:00"]
+    },
+    {
+      "friend": "妈妈",
+      "message": "该量血压了 🩺",
+      "days": ["1", "3", "5"],
+      "times": ["09:00"]
+    }
+  ]
 }
 ```
 
 | 字段 | 说明 |
 |------|------|
-| `friend` | 好友在微信里的**备注名**（搜索用） |
-| `message` | 提醒文案（支持中文/emoji） |
-| `schedule_time` | 每天提醒时间，24 小时制 `HH:MM` |
+| `reminders[].friend` | 好友在微信里的**备注名**（搜索用） |
+| `reminders[].message` | 提醒文案（支持中文/emoji） |
+| `reminders[].days` | `daily`=每天；`weekdays`=周一~五；`weekends`=六日；或数组 `[1..7]`（1=周一） |
+| `reminders[].times` | 每天触发时段数组，24 小时制 `HH:MM`，可多个 |
+
+> 改配置后**无需重装定时任务**——任务每分钟检查一次配置。
 
 ### 2. 首次授权（一次性）
 
@@ -49,14 +77,15 @@ wechat_reminder/
 # 先手动测试发一条（确认参数和权限 OK）
 python send_reminder.py
 
-# 注册每天定时任务（读取 config.json 的时间）
+# 手动发送给指定好友（覆盖配置）
+python send_reminder.py -n 我宝 -m "记得吃药啦 💊"
+
+# 注册定时任务（每分钟检查一次配置，改配置无需重装）
 python install_schedule.py
 
 # 卸载定时任务
 python install_schedule.py --uninstall
 ```
-
----
 
 ## 原理
 
@@ -69,10 +98,14 @@ python install_schedule.py --uninstall
 
 ## 定时机制
 
+定时任务**每分钟**触发一次 `send_reminder.py --scheduled`，脚本判断当前时刻是否落在某提醒的时段内（±5 分钟容差），并用 `reminder_state.json` 防止同一天同一时段重复发送。
+
 | 系统 | 机制 | 管理方式 |
 |------|------|----------|
-| macOS | launchd (`~/Library/LaunchAgents/com.wechat.reminder.plist`) | `launchctl list \| grep wechat` |
-| Windows | 任务计划程序（任务名 `WeChatMedicineReminder`） | 控制面板 → 管理工具 → 任务计划程序 |
+| macOS | launchd (`~/Library/LaunchAgents/com.wechat.reminder.plist`, `StartInterval=60`) | `launchctl list \| grep wechat` |
+| Windows | 任务计划程序（任务名 `WeChatMedicineReminder`, 每分钟） | 控制面板 → 管理工具 → 任务计划程序 |
+
+> 因为任务每分钟检查，**修改 `config.json`（加好友/改时间/换文案）即时生效，无需重装任务**。
 
 ## 可靠性设计（已内置）
 
@@ -82,11 +115,12 @@ python install_schedule.py --uninstall
 | 失败重试 | 最多重试 3 次，间隔 2 秒 |
 | 结果验证 | 发送后读取 UI 树，确认会话已打开、剪贴板已被消费 |
 | 锁屏处理 | 检测锁屏则等待解锁（最多 4 小时，每 15 秒轮询）再发送 |
+| 防重复 | 状态文件记录 `好友|日期|时段`，同一天同一时段只发一次 |
 | 剪贴板还原 | 尽力还原用户原有剪贴板内容 |
 
 ## 注意事项（重要）
 
-1. **微信必须保持登录**，且电脑**不要锁屏**（锁屏时 UI 自动化无法点击）。
+1. **微信必须保持登录**，且电脑**不要锁屏**（锁屏时 UI 自动化无法点击）。定时模式遇锁屏会跳过本次，解锁后下一分钟补发。
 2. 任务在**当前用户会话**下运行，需保持登录态。
 3. Windows 的 uiautomation 适配微信 3.x 桌面版；若微信更新导致定位失败，可能需要调整 `send_reminder.py` 中的控件查找参数。
 4. 发送记录写入 `reminder.log`，排查问题先看它。
