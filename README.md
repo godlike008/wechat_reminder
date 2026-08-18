@@ -16,6 +16,7 @@
 wechat_reminder/
 ├── config.json            # 参数配置（含隐私，不入库）
 ├── config.example.json    # 配置示例（可克隆）
+├── setup.py               # 交互式配置向导
 ├── send_reminder.py       # 发送核心（macOS + Windows 通用）
 ├── install_schedule.py    # 注册/卸载定时任务
 ├── reminder.log           # 发送日志（自动生成）
@@ -26,7 +27,15 @@ wechat_reminder/
 
 ### 1. 配置参数
 
-复制示例并编辑 `config.json`：
+**推荐用交互式配置向导**，免手改 JSON：
+
+```bash
+python setup.py
+```
+
+向导支持：添加/编辑/删除提醒、逐天勾选星期、多个时段、实时预览，自动生成 `config.json`（`--preview` 仅查看）。
+
+也可以复制示例手动编辑：
 
 ```bash
 cp config.example.json config.json
