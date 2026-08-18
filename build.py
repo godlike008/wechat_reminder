@@ -24,11 +24,14 @@ def run(args):
     print(">>>", " ".join(args))
     result = subprocess.run(args, capture_output=True, text=True)
     if result.returncode != 0:
-        print("命令失败，退出码", result.returncode)
-        print("--- stdout ---")
-        print(result.stdout[-3000:])
-        print("--- stderr ---")
-        print(result.stderr[-3000:])
+        msg = "命令失败，退出码 %d\n>>> %s\n--- stdout ---\n%s\n--- stderr ---\n%s\n" % (
+            result.returncode, " ".join(args), result.stdout[-4000:], result.stderr[-4000:])
+        print(msg)
+        try:
+            with open(os.path.join(BASE_DIR, "build_error.log"), "w", encoding="utf-8") as f:
+                f.write(msg)
+        except Exception:
+            pass
         sys.exit(1)
 
 
