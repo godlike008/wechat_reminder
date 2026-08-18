@@ -22,7 +22,14 @@ BUILD_DIR = os.path.join(BASE_DIR, "build")
 
 def run(args):
     print(">>>", " ".join(args))
-    subprocess.run(args, check=True)
+    result = subprocess.run(args, capture_output=True, text=True)
+    if result.returncode != 0:
+        print("命令失败，退出码", result.returncode)
+        print("--- stdout ---")
+        print(result.stdout[-3000:])
+        print("--- stderr ---")
+        print(result.stderr[-3000:])
+        sys.exit(1)
 
 
 def pyinstaller_cmd():
