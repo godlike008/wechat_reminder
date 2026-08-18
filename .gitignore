@@ -1,0 +1,13 @@
+# 日志
+*.log
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# 本地配置（含好友备注名等隐私）
+config.json
+
+# macOS
+.DS_Store
