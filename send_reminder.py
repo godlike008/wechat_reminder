@@ -27,7 +27,15 @@ import sys
 import time
 from datetime import datetime
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+def _program_dir():
+    """返回程序所在目录：PyInstaller 打包后指向可执行文件旁，
+    普通运行时指向脚本所在目录。config/日志均放在该目录。"""
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(os.path.abspath(sys.executable))
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+BASE_DIR = _program_dir()
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 LOG_PATH = os.path.join(BASE_DIR, "reminder.log")
 STATE_PATH = os.path.join(BASE_DIR, "reminder_state.json")

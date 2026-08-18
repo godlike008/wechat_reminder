@@ -13,7 +13,14 @@ import sys
 import tkinter as tk
 from tkinter import messagebox, ttk
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+def _program_dir():
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(os.path.abspath(sys.executable))
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+BASE_DIR = _program_dir()
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 
 TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")

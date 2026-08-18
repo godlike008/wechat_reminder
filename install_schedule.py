@@ -18,8 +18,21 @@ import platform
 import subprocess
 import sys
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-SCRIPT_PATH = os.path.join(BASE_DIR, "send_reminder.py")
+
+def _program_dir():
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(os.path.abspath(sys.executable))
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+BASE_DIR = _program_dir()
+# 打包后调度同目录的 wechat-send 可执行文件(带 --scheduled);
+# 源码模式调度 send_reminder.py
+if getattr(sys, "frozen", False):
+    exe_name = "wechat-send.exe" if platform.system() == "Windows" else "wechat-send"
+    SCRIPT_PATH = os.path.join(BASE_DIR, exe_name)
+else:
+    SCRIPT_PATH = os.path.join(BASE_DIR, "send_reminder.py")
 LABEL = "com.wechat.reminder"
 WIN_TASK_NAME = "WeChatMedicineReminder"
 

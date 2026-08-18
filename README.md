@@ -20,9 +20,26 @@ wechat_reminder/
 ├── setup.py               # 交互式命令行配置向导
 ├── send_reminder.py       # 发送核心（macOS + Windows 通用）
 ├── install_schedule.py    # 注册/卸载定时任务
+├── build.py               # 本地 PyInstaller 打包脚本
+├── .github/workflows/     # GitHub Actions 自动构建(macOS/Windows)
 ├── reminder.log           # 发送日志（自动生成）
 └── reminder_state.json    # 发送状态（自动生成，防重复）
 ```
+
+## 打包分发（免 Python）
+
+**方式一：GitHub Actions 自动构建**（推荐）
+- 打 tag 即自动打包 macOS + Windows：`git tag v1.0 && git push --tags`
+- 构建完成后在仓库 **Releases** 页面下载对应平台的 zip
+
+**方式二：本地打包**
+```bash
+pip install pyinstaller
+python build.py
+```
+生成 `dist/`：`wechat-gui`（配置界面）、`wechat-send`（发送核心）、`wechat-install`（定时任务注册器）+ 示例配置。把整个 `dist/` 目录拷给朋友，`config.example.json` 复制成 `config.json` 即可。
+
+> 打包后所有程序都从**可执行文件所在目录**读取 `config.json`，务必把三个程序和配置放同一文件夹。
 
 ## 快速开始（两台平台都只需 3 步）
 

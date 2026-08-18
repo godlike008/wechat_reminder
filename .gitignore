@@ -9,5 +9,13 @@ __pycache__/
 # 本地配置（含好友备注名等隐私）
 config.json
 
+# 发送状态（运行生成）
+reminder_state.json
+
+# 打包产物
+dist/
+build/
+*.spec
+
 # macOS
 .DS_Store
